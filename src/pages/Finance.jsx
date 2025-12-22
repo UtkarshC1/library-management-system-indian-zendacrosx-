@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { 
-  Plus, TrendingUp, TrendingDown, IndianRupee, Trash2, 
+  TrendingUp, TrendingDown, IndianRupee, Trash2, 
   PieChart, BarChart as BarChartIcon, List, AlertCircle, 
-  FileSpreadsheet, MessageCircle 
+  FileSpreadsheet, MessageCircle, Plus 
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, 
@@ -17,7 +17,7 @@ const Finance = () => {
   const transactions = useLiveQuery(() => db.finance.toArray());
   const students = useLiveQuery(() => db.students.toArray());
 
-  const [view, setView] = useState('Dashboard'); // 'Dashboard' or 'Transactions'
+  const [view, setView] = useState('Dashboard'); 
   const [tab, setTab] = useState('Income'); 
   const [form, setForm] = useState({ amount: '', desc: '', category: 'Fees' });
 
@@ -26,7 +26,6 @@ const Finance = () => {
   const expense = transactions?.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amount, 0) || 0;
   const balance = income - expense;
 
-  // 1. Calculate Pending Fees
   const calculatePendingFees = () => {
     if (!students || !transactions) return 0;
     let pending = 0;
@@ -43,7 +42,7 @@ const Finance = () => {
   };
   const pendingFees = calculatePendingFees();
 
-  // 2. CSV EXPORT LOGIC (New Feature)
+  // --- FIX: BETTER CSV EXPORT ---
   const exportCSV = () => {
     if (!transactions || transactions.length === 0) return alert("No transactions to export.");
     
@@ -52,16 +51,18 @@ const Finance = () => {
         `${new Date(t.date).toLocaleDateString()},${t.type},${t.category},${t.amount},"${t.description}"`
     );
     
-    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Finance_Report_${new Date().toISOString().slice(0,10)}.csv`);
+    link.href = url;
+    link.download = `Finance_Report_${new Date().toISOString().slice(0,10)}.csv`;
     document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
   };
 
-  // 3. Prepare Chart Data
   const expenseData = transactions
     ?.filter(t => t.type === 'Expense')
     .reduce((acc, t) => {
@@ -72,12 +73,8 @@ const Finance = () => {
     }, []) || [];
   
   const COLORS = ['#FF8042', '#0088FE', '#00C49F', '#FFBB28', '#FF4444'];
+  const barData = [{ name: 'Total', Income: income, Expense: expense }];
 
-  const barData = [
-    { name: 'Total', Income: income, Expense: expense }
-  ];
-
-  // --- HANDLERS ---
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!form.amount || !form.desc) return;
@@ -100,8 +97,6 @@ const Finance = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 animate-fade-in">
-      
-      {/* HEADER TABS */}
       <div className="bg-white p-2 sticky top-0 z-10 shadow-sm flex gap-2 border-b border-gray-100">
         <button onClick={() => setView('Dashboard')} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${view === 'Dashboard' ? 'bg-black text-white shadow-lg' : 'bg-gray-100 text-gray-500'}`}>
           <BarChartIcon size={18}/> Analytics
@@ -111,16 +106,12 @@ const Finance = () => {
         </button>
       </div>
 
-      {/* === VIEW 1: DASHBOARD (ANALYTICS) === */}
       {view === 'Dashboard' && (
         <div className="p-4 space-y-6">
-          
-          {/* NET PROFIT CARD */}
           <div className="bg-gradient-to-br from-indigo-900 to-blue-800 text-white p-6 rounded-3xl shadow-xl relative overflow-hidden">
-            {/* Background Decoration */}
             <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-            
             <p className="opacity-70 text-xs font-bold uppercase tracking-wider relative z-10">Current Balance</p>
+            {/* FIX: Rupee Symbol */}
             <h1 className="text-4xl font-bold mt-1 mb-6 relative z-10">₹{balance.toLocaleString()}</h1>
             
             <div className="grid grid-cols-2 gap-4 relative z-10">
@@ -135,7 +126,6 @@ const Finance = () => {
             </div>
           </div>
 
-          {/* ACTION BUTTONS (New Feature) */}
           <div className="flex gap-3 overflow-x-auto pb-1">
              <button onClick={exportCSV} className="flex-1 flex items-center justify-center gap-2 bg-white border border-green-200 text-green-700 px-4 py-3 rounded-xl font-bold text-xs shadow-sm active:scale-95 transition-transform whitespace-nowrap">
                  <FileSpreadsheet size={16}/> Export Excel
@@ -147,7 +137,6 @@ const Finance = () => {
              )}
           </div>
 
-          {/* PENDING FEES ALERT */}
           {pendingFees > 0 && (
              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -160,7 +149,6 @@ const Finance = () => {
              </div>
           )}
 
-          {/* BAR CHART: INCOME vs EXPENSE */}
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><BarChartIcon size={18}/> Cash Flow</h3>
              <div className="h-48 w-full">
@@ -175,7 +163,6 @@ const Finance = () => {
              </div>
           </div>
 
-          {/* PIE CHART: EXPENSE BREAKDOWN */}
           {expenseData.length > 0 && (
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PieChart size={18}/> Expense Breakdown</h3>
@@ -194,15 +181,11 @@ const Finance = () => {
               </div>
             </div>
           )}
-
         </div>
       )}
 
-      {/* === VIEW 2: TRANSACTIONS (LIST & ADD) === */}
       {view === 'Transactions' && (
         <div className="p-4 space-y-4">
-           
-           {/* ADD FORM */}
            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
               <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
                 <button onClick={() => setTab('Income')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${tab === 'Income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-400'}`}>Income</button>
@@ -214,35 +197,19 @@ const Finance = () => {
                     <input required type="number" placeholder="Amount" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} className="w-1/3 p-3 bg-gray-50 rounded-xl font-bold outline-none border border-gray-100 focus:border-blue-500" />
                     <input required placeholder="Description" value={form.desc} onChange={e => setForm({...form, desc: e.target.value})} className="flex-1 p-3 bg-gray-50 rounded-xl font-medium outline-none border border-gray-100 focus:border-blue-500" />
                  </div>
-                 
-                 {/* Category Dropdown */}
                  <select value={form.category} onChange={e => setForm({...form, category: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl font-medium outline-none text-gray-600 border border-gray-100">
                     {tab === 'Income' ? (
-                        <>
-                           <option>Fees</option>
-                           <option>Grants</option>
-                           <option>Other</option>
-                        </>
+                        <><option>Fees</option><option>Grants</option><option>Other</option></>
                     ) : (
-                        <>
-                           <option>Rent</option>
-                           <option>Electricity</option>
-                           <option>Internet</option>
-                           <option>Maintenance</option>
-                           <option>Salary</option>
-                           <option>Refreshments</option>
-                           <option>Other</option>
-                        </>
+                        <><option>Rent</option><option>Electricity</option><option>Internet</option><option>Maintenance</option><option>Salary</option><option>Refreshments</option><option>Other</option></>
                     )}
                  </select>
-
                  <button type="submit" className={`w-full p-3 rounded-xl text-white font-bold shadow-lg active:scale-95 transition-transform flex justify-center gap-2 ${tab === 'Income' ? 'bg-green-600 shadow-green-200' : 'bg-red-500 shadow-red-200'}`}>
                    <Plus size={20} /> Add Transaction
                  </button>
               </form>
            </div>
 
-           {/* LIST */}
            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">Recent Activity</h3>
            {[...(transactions || [])].reverse().map(t => (
               <div key={t.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center">
@@ -266,7 +233,6 @@ const Finance = () => {
            ))}
         </div>
       )}
-
     </div>
   );
 };
