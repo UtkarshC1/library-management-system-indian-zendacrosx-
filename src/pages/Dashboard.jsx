@@ -1,99 +1,126 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { ChevronDown, Armchair, UserCheck, Sun, Moon, Clock } from 'lucide-react';
+import { ChevronDown, UserCheck, Clock, AlertCircle } from 'lucide-react';
 
 const Dashboard = () => {
-  // 1. Fetch Data
   const rooms = useLiveQuery(() => db.rooms.toArray());
   const students = useLiveQuery(() => db.students.where('status').equals('Active').toArray());
   
-  // 2. Fetch Live Attendance (Who is INSIDE right now?)
+  // State to trigger re-render every minute for time checks
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000); // Update every min
+    return () => clearInterval(timer);
+  }, []);
+
+  // Real-time "Who is inside" check
   const activeAttendance = useLiveQuery(async () => {
-    const today = new Date();
-    today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
     const logs = await db.attendance.where('date').above(today).toArray();
-    
-    // Logic: Find the latest log for each student to determine current status
     const insideSet = new Set();
-    const studentStatus = {}; 
-    logs.forEach(l => { studentStatus[l.studentId] = l.status; });
     
-    Object.keys(studentStatus).forEach(id => {
-        if(studentStatus[id] === 'In') insideSet.add(parseInt(id));
+    // Group by student to get latest log
+    const statusMap = {};
+    logs.forEach(l => statusMap[l.studentId] = l.status);
+    Object.keys(statusMap).forEach(id => {
+        if(statusMap[id] === 'In') insideSet.add(parseInt(id));
     });
     return insideSet;
   });
 
   const [selectedRoomId, setSelectedRoomId] = useState(null);
 
-  // Auto-select first room
   useEffect(() => {
-    if (rooms && rooms.length > 0 && !selectedRoomId) {
-      setSelectedRoomId(rooms[0].id);
-    }
+    if (rooms && rooms.length > 0 && !selectedRoomId) setSelectedRoomId(rooms[0].id);
   }, [rooms]);
 
-  // --- LOADING STATE ---
-  if (!rooms || !students) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center space-y-4">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-gray-400 font-bold text-sm">Loading Library...</p>
-      </div>
-    );
-  }
+  if (!rooms || !students) return <div className="p-10 text-center">Loading...</div>;
+  if (rooms.length === 0) return <div className="p-10 text-center">No Rooms Configured.</div>;
 
-  // --- EMPTY STATE ---
-  if (rooms.length === 0) {
-     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-10 text-center">
-            <div className="bg-white p-6 rounded-full shadow-sm mb-4">
-                <Armchair size={48} className="text-gray-300"/>
-            </div>
-            <h2 className="text-xl font-bold text-gray-800">No Rooms Configured</h2>
-            <p className="text-gray-400 mb-6">Go to Settings to create your first seating zone.</p>
-            <a href="/settings" className="bg-black text-white px-6 py-3 rounded-xl font-bold">Configure Rooms</a>
-        </div>
-     );
-  }
-
-  // --- PREPARE DATA FOR GRID ---
   const currentRoom = rooms.find(r => r.id === parseInt(selectedRoomId));
   const roomStudents = students.filter(s => s.roomId === parseInt(selectedRoomId));
 
   const seatMap = {};
   roomStudents.forEach(s => {
-    if (s.seat_no) seatMap[s.seat_no] = s;
+    if (s.seat_no) {
+       seatMap[s.seat_no] = s;
+    }
   });
 
-  const totalSeats = currentRoom ? currentRoom.capacity : 0;
-  const seats = Array.from({ length: totalSeats }, (_, i) => i + 1);
-  const gridCols = currentRoom?.cols || 5;
+  const seats = Array.from({ length: currentRoom?.capacity || 0 }, (_, i) => i + 1);
+  const actuallyInsideCount = roomStudents.filter(s => activeAttendance?.has(s.id)).length;
 
-  // Stats
-  const occupiedCount = roomStudents.length;
-  const actuallyInsideCount = roomStudents.filter(s => activeAttendance?.has(s.id)).length || 0;
+  // --- HELPER: DETERMINE SEAT STATUS COLOR ---
+  const getSeatStatus = (student, isInside) => {
+    if (!student) return { 
+        style: 'bg-white border-gray-200 text-gray-300', 
+        icon: null 
+    };
+
+    // 1. CHECK OVERSTAY (Inside + Past End Time) -> ORANGE
+    if (isInside && student.endTime) {
+        const [h, m] = student.endTime.split(':');
+        const endTime = new Date(); endTime.setHours(h, m, 0);
+        if (now > endTime) {
+            return { 
+                style: 'bg-orange-100 border-orange-300 text-orange-700 animate-pulse', 
+                icon: <Clock size={12} className="absolute top-1 right-1"/>,
+                label: 'OVERSTAY'
+            };
+        }
+    }
+
+    // 2. STANDARD INSIDE -> GREEN
+    if (isInside) {
+        return { 
+            style: 'bg-green-100 border-green-300 text-green-700', 
+            icon: <UserCheck size={12} className="absolute top-1 right-1"/> 
+        };
+    }
+
+    // 3. CHECK ABSENT/LATE (Reserved + Not Inside + Within Shift) -> PURPLE
+    if (student.seatType === 'Reserved' && student.startTime && student.endTime) {
+        const [sH, sM] = student.startTime.split(':');
+        const startTime = new Date(); startTime.setHours(sH, sM, 0);
+
+        const [eH, eM] = student.endTime.split(':');
+        const endTime = new Date(); endTime.setHours(eH, eM, 0);
+
+        // If current time is between Start & End, but they are NOT inside
+        if (now >= startTime && now <= endTime) {
+            return { 
+                style: 'bg-purple-100 border-purple-300 text-purple-700', 
+                icon: <AlertCircle size={12} className="absolute top-1 right-1"/>,
+                label: 'ABSENT'
+            };
+        }
+    }
+
+    // 4. STANDARD AWAY -> RED
+    return { 
+        style: 'bg-red-50 border-red-200 text-red-400', 
+        icon: null 
+    };
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 animate-fade-in">
-      
-      {/* HEADER CONTROLS */}
+      {/* HEADER */}
       <div className="bg-white sticky top-0 z-10 shadow-sm border-b border-gray-100 px-4 py-3 flex justify-between items-center">
-        
-        {/* Room Selector */}
-        <div className="relative group">
+        <div className="relative">
           <select 
             value={selectedRoomId || ''}
             onChange={(e) => setSelectedRoomId(parseInt(e.target.value))}
-            className="appearance-none bg-transparent font-bold text-xl text-gray-800 pr-8 focus:outline-none cursor-pointer z-10 relative"
+            className="appearance-none bg-transparent font-bold text-xl text-gray-800 pr-8 outline-none"
           >
             {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
-          <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none group-hover:text-blue-600 transition-colors" size={20} />
+          <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={20} />
         </div>
 
-        {/* Live Counters */}
+        {/* LEGEND / COUNTERS */}
         <div className="flex gap-4 text-[10px] font-bold uppercase tracking-wider">
            <div className="text-center">
               <span className="block text-lg text-green-600">{actuallyInsideCount}</span> 
@@ -101,81 +128,55 @@ const Dashboard = () => {
            </div>
            <div className="w-px h-8 bg-gray-100"></div>
            <div className="text-center">
-              <span className="block text-lg text-red-500">{occupiedCount - actuallyInsideCount}</span> 
+              <span className="block text-lg text-red-500">{roomStudents.length - actuallyInsideCount}</span> 
               <span className="text-gray-400">Away</span>
            </div>
         </div>
       </div>
 
-      {/* SEAT GRID */}
-      <div className="p-4 overflow-x-auto">
+      {/* GRID */}
+      <div className="p-4">
         <div 
-            className="grid gap-3 mx-auto transition-all"
-            style={{ 
-                gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
-            }}
+            className="grid gap-3 mx-auto" 
+            style={{ gridTemplateColumns: `repeat(${currentRoom?.cols || 5}, minmax(0, 1fr))` }}
         >
           {seats.map((seatNum) => {
             const student = seatMap[seatNum];
-            const isAssigned = !!student;
-            const isInside = isAssigned && activeAttendance?.has(student.id);
-
-            // Shift Logic
-            const isMorning = student?.shift === 'Morning' || student?.shift === 'Full Day';
-            const isEvening = student?.shift === 'Evening' || student?.shift === 'Full Day';
+            const isInside = student && activeAttendance?.has(student.id);
+            const status = getSeatStatus(student, isInside);
 
             return (
               <div 
                 key={seatNum}
-                onClick={() => isAssigned && alert(`Name: ${student.name}\nShift: ${student.shift || 'Full Day'}\nStatus: ${isInside ? 'INSIDE' : 'AWAY'}`)}
                 className={`
-                  aspect-square rounded-xl flex flex-col items-center justify-center border transition-all relative overflow-hidden shadow-sm cursor-pointer active:scale-95 group
-                  ${!isAssigned ? 'bg-white border-gray-200 hover:border-blue-300' : ''}
-                  ${isAssigned && !isInside ? 'bg-red-50 border-red-200' : ''}
-                  ${isInside ? 'bg-green-100 border-green-300 ring-2 ring-green-100' : ''}
+                  aspect-square rounded-xl flex flex-col items-center justify-center border transition-all relative overflow-hidden shadow-sm
+                  ${status.style}
                 `}
               >
-                {/* Seat Number */}
-                <span className={`text-sm font-bold ${!isAssigned ? 'text-gray-300' : (isInside ? 'text-green-700' : 'text-red-400')}`}>
-                  {seatNum}
-                </span>
+                <span className="text-sm font-bold">{seatNum}</span>
 
-                {/* --- PRO FEATURE: SHIFT INDICATORS --- */}
-                {isAssigned && (
-                   <div className="absolute top-1.5 left-1.5 flex gap-0.5">
-                      {isMorning && <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-sm" title="Morning Shift"></div>}
-                      {isEvening && <div className="w-1.5 h-1.5 rounded-full bg-blue-800 shadow-sm" title="Evening Shift"></div>}
-                   </div>
+                {student && (
+                  <>
+                    <div className={`absolute bottom-0 w-full py-0.5 ${isInside ? 'bg-green-600' : (status.label === 'ABSENT' ? 'bg-purple-600' : 'bg-red-100')}`}>
+                        <p className={`text-[8px] font-bold text-center truncate px-1 ${isInside || status.label === 'ABSENT' ? 'text-white' : 'text-red-800'}`}>
+                        {student.name.split(' ')[0]}
+                        </p>
+                    </div>
+                    {status.icon}
+                  </>
                 )}
-
-                {/* Name Label */}
-                {isAssigned && (
-                  <div className={`absolute bottom-0 w-full py-0.5 ${isInside ? 'bg-green-600' : 'bg-red-100'}`}>
-                    <p className={`text-[8px] font-bold text-center truncate px-1 ${isInside ? 'text-white' : 'text-red-800'}`}>
-                      {student.name.split(' ')[0]}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Status Icon */}
-                {isInside && <UserCheck size={12} className="absolute top-1 right-1 text-green-600"/>}
               </div>
             );
           })}
         </div>
-      </div>
-
-      {/* LEGEND */}
-      <div className="flex justify-center flex-wrap gap-4 mt-2 px-4 pb-4">
-         <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-amber-400"></div> <span className="text-[10px] font-bold text-gray-500 uppercase">Morning</span>
-         </div>
-         <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-blue-800"></div> <span className="text-[10px] font-bold text-gray-500 uppercase">Evening</span>
-         </div>
-         <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded bg-green-100 border border-green-300"></div> <span className="text-[10px] font-bold text-gray-500 uppercase">Inside</span>
-         </div>
+        
+        {/* LEGEND FOOTER */}
+        <div className="mt-6 flex gap-3 justify-center flex-wrap">
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div><span className="text-[10px] text-gray-500 font-bold">Inside</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-50 border border-red-200 rounded"></div><span className="text-[10px] text-gray-500 font-bold">Away</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-purple-100 border border-purple-300 rounded"></div><span className="text-[10px] text-gray-500 font-bold">Absent (Shift Active)</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-100 border border-orange-300 rounded"></div><span className="text-[10px] text-gray-500 font-bold">Overstay</span></div>
+        </div>
       </div>
     </div>
   );

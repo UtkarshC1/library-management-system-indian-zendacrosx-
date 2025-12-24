@@ -16,7 +16,7 @@ const Admission = () => {
     address: '',
     mobile: '',
     emergencyContact: '',
-    aadharNo: '', // <--- NEW FIELD
+    aadharNo: '', 
     roomId: '',
     seatType: 'Reserved',
     seat_no: '',
@@ -24,7 +24,7 @@ const Admission = () => {
     startTime: '08:00',
     endTime: '14:00',
     photo: null,
-    aadhar: null // This is the image
+    aadhar: null 
   });
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -76,7 +76,7 @@ const Admission = () => {
     
     doc.text(`Full Name:  ${data.name}`, 14, y); y += lineHeight;
     doc.text(`Father's Name:  ${data.fathersName}`, 14, y); y += lineHeight;
-    doc.text(`Aadhar Number:  ${data.aadharNo}`, 14, y); y += lineHeight; // <--- Printed Here
+    doc.text(`Aadhar Number:  ${data.aadharNo}`, 14, y); y += lineHeight;
     doc.text(`Address:  ${data.address}`, 14, y); y += lineHeight;
     doc.text(`Mobile:  ${data.mobile}`, 14, y); y += lineHeight;
     doc.text(`Emergency Contact:  ${data.emergencyContact}`, 14, y); y += lineHeight;
@@ -129,6 +129,14 @@ const Admission = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (formData.seatType === 'Reserved' && !formData.roomId) return alert("Please select a Room for reserved seat.");
+    if (formData.seatType === 'Reserved') {
+        if (!formData.roomId) return alert("Please select a Room.");
+        if (!formData.seat_no) return alert("Please enter a Seat Number.");
+    }
+    
+    // For general students, we check if roomId (preferred zone) is selected, though it's optional in logic, 
+    // it's good practice to enforce it if you want the 'preferred' logic to work.
+    // if (formData.seatType === 'General' && !formData.roomId) return alert("Please select a Preferred Zone.");
 
     try {
       await db.students.add({ 
@@ -241,7 +249,7 @@ const Admission = () => {
              </div>
           </div>
           
-          {/* Show Seat Selectors ONLY if Reserved */}
+          {/* Show Seat Selectors */}
           {formData.seatType === 'Reserved' ? (
               <div className="space-y-3 animate-fade-in">
                 <select name="roomId" onChange={handleChange} className="w-full p-3 bg-white rounded-xl border border-blue-200 text-gray-700 font-medium focus:outline-none" required>
@@ -251,7 +259,14 @@ const Admission = () => {
                 <input type="number" name="seat_no" placeholder="Seat Number" onChange={handleChange} className="w-full p-3 bg-white rounded-xl border border-blue-200 text-center font-bold focus:outline-none" />
               </div>
           ) : (
-              <p className="text-xs text-blue-600/70 italic text-center py-2">Student can sit in any available seat.</p>
+              // FIXED SECTION: Wrapped siblings in a single parent <div>
+              <div className="space-y-3 animate-fade-in">
+                 <select name="roomId" onChange={handleChange} className="w-full p-3 bg-white rounded-xl border border-blue-200 text-gray-700 font-medium outline-none" required>
+                    <option value="">{formData.seatType === 'Reserved' ? 'Select Room' : 'Select Preferred Zone'}</option>
+                    {rooms?.map(r => <option key={r.id} value={r.id}>{r.name} (Cap: {r.capacity})</option>)}
+                 </select>
+                 <p className="text-xs text-blue-600/70 italic text-center py-2">Student can sit in any available seat.</p>
+              </div>
           )}
         </div>
 

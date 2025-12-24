@@ -33,6 +33,18 @@ const StudentProfile = () => {
   };
 
   const handleSave = async () => {
+    // --- BUG FIX: CHECK FOR SEAT CONFLICT ---
+    if (formData.seatType === 'Reserved' && formData.roomId && formData.seat_no) {
+      const conflict = await db.students
+        .where({ roomId: parseInt(formData.roomId), seat_no: parseInt(formData.seat_no) })
+        .first();
+      
+      // If a student exists in this seat AND it is not the current student
+      if (conflict && conflict.id !== studentId) {
+        return alert(`Seat ${formData.seat_no} is already taken by ${conflict.name}!`);
+      }
+    }
+
     await db.students.update(studentId, {
         ...formData,
         roomId: formData.roomId ? parseInt(formData.roomId) : null,

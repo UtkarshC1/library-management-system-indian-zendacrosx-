@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Settings from './pages/Settings';
@@ -9,15 +9,36 @@ import Finance from './pages/Finance';
 import StudentProfile from './pages/StudentProfile';
 import Scanner from './pages/Scanner';
 import Attendance from './pages/Attendance';
-import LockScreen from './pages/LockScreen'; // <--- Import
+import LockScreen from './pages/LockScreen';
+import { db } from './db/db';
+import { performBackup } from './utils/backup'; // Import utility
 
 function App() {
-  // Simple Session Auth
   const [isAuth, setIsAuth] = useState(sessionStorage.getItem('isAuth') === 'true');
 
-  const handleUnlock = () => {
+  const handleUnlock = async () => {
     sessionStorage.setItem('isAuth', 'true');
     setIsAuth(true);
+
+    // --- AUTOMATIC BACKUP CHECK ---
+    try {
+      const settings = await db.settings.toArray();
+      const autoBackup = settings.find(s => s.key === 'autoBackup')?.value === 'true';
+      const lastDate = settings.find(s => s.key === 'lastBackupDate')?.value;
+      const today = new Date().toDateString();
+
+      // If Auto Backup is ON and Last Backup was NOT today
+      if (autoBackup && lastDate !== today) {
+         console.log("Triggering Auto Backup...");
+         const success = await performBackup();
+         if(success) {
+           // Small notification (using generic alert, or you can use a toast component if you have one)
+           setTimeout(() => alert("✅ Daily Backup Downloaded Successfully"), 500);
+         }
+      }
+    } catch(err) {
+      console.error("Auto Backup Check Failed", err);
+    }
   };
 
   if (!isAuth) {
