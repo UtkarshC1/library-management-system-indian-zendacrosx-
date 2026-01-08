@@ -11,10 +11,17 @@ import Scanner from './pages/Scanner';
 import Attendance from './pages/Attendance';
 import LockScreen from './pages/LockScreen';
 import { db } from './db/db';
-import { performBackup } from './utils/backup'; // Import utility
+import { performBackup } from './utils/backup';
 
 function App() {
-  const [isAuth, setIsAuth] = useState(sessionStorage.getItem('isAuth') === 'true');
+  const [isAuth, setIsAuth] = useState(() => sessionStorage.getItem('isAuth') === 'true');
+  const [notification, setNotification] = useState(null);
+
+  // Helper to show temporary toast notification
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
 
   const handleUnlock = async () => {
     sessionStorage.setItem('isAuth', 'true');
@@ -27,17 +34,24 @@ function App() {
       const lastDate = settings.find(s => s.key === 'lastBackupDate')?.value;
       const today = new Date().toDateString();
 
-      // If Auto Backup is ON and Last Backup was NOT today
+      // Run backup if enabled and not done today
       if (autoBackup && lastDate !== today) {
          console.log("Triggering Auto Backup...");
          const success = await performBackup();
-         if(success) {
-           // Small notification (using generic alert, or you can use a toast component if you have one)
-           setTimeout(() => alert("✅ Daily Backup Downloaded Successfully"), 500);
+         if (success) {
+           showNotification("✅ Daily Backup Saved Automatically");
+           
+           // Update last backup date to prevent loop
+           const existingSetting = settings.find(s => s.key === 'lastBackupDate');
+           if (existingSetting) {
+             await db.settings.updateXH(existingSetting.id, { value: today });
+           } else {
+             await db.settings.add({ key: 'lastBackupDate', value: today });
+           }
          }
       }
-    } catch(err) {
-      console.error("Auto Backup Check Failed", err);
+    } catch (err) {
+      console.error("Auto Backup Check Failed:", err);
     }
   };
 
@@ -47,8 +61,19 @@ function App() {
 
   return (
     <Router>
-      <div className="min-h-screen bg-gray-200 flex justify-center items-start">
-        <div className="w-full max-w-[480px] bg-gray-50 min-h-screen shadow-2xl relative font-sans text-gray-900 select-none pb-24">
+      {/* Outer container: darker background for desktop contrast */}
+      <div className="min-h-screen bg-gray-200 flex justify-center items-start shadow-inner">
+        
+        {/* Mobile-styled app container */}
+        <div className="w-full max-w-[480px] bg-gray-50 min-h-screen shadow-2xl relative font-sans text-gray-900 select-none pb-24 border-x border-gray-300">
+          
+          {/* Custom Notification Toast */}
+          {notification && (
+            <div className="absolute top-5 left-1/2 transform -translate-x-1/2 z-50 bg-black/80 text-white px-4 py-2 rounded-full text-sm shadow-lg animate-fade-in">
+              {notification}
+            </div>
+          )}
+
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/students" element={<Students />} />
@@ -59,6 +84,7 @@ function App() {
             <Route path="/finance" element={<Finance />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
+          
           <Navbar />
         </div>
       </div>

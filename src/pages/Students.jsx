@@ -18,8 +18,8 @@ const Students = () => {
   const [search, setSearch] = useState('');
 
   const getSetting = (key) => settings?.find(s => s.key === key)?.value || '';
-  const libraryName = getSetting('libraryName') || "Granthalaya Library";
-  const libraryAddress = getSetting('libraryAddress') || "Main Reading Hall";
+  const libraryName = getSetting('libraryName') || "Library Management System";
+  const libraryAddress = getSetting('libraryAddress') || "Reading Hall, City Center";
   const getRoomName = (id) => rooms?.find(r => r.id === id)?.name || 'Unknown';
 
   const checkFeeStatus = (studentId) => {
@@ -38,94 +38,127 @@ const Students = () => {
     return uniqueDays.size;
   };
 
-  // --- 🎨 PRO ID CARD GENERATOR ---
+  // --- 🎨 CLEAN & PROFESSIONAL ID CARD ---
   const generateIDCard = async (e, student) => {
     e.stopPropagation();
-    // 85.6mm x 54mm (Standard Credit Card)
+    // Standard Credit Card Size: 85.6mm x 54mm
     const doc = new jsPDF('landscape', 'mm', [85.6, 54]);
     
-    // Background & Border
+    // --- 1. BACKGROUND DESIGN ---
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(0, 0, 85.6, 54, 2, 2, 'F');
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.1);
-    doc.roundedRect(0, 0, 85.6, 54, 2, 2, 'S');
+    doc.rect(0, 0, 85.6, 54, 'F');
 
-    // Left Colored Panel (Brand Color)
-    doc.setFillColor(37, 99, 235); // Blue-600
-    doc.rect(0, 0, 26, 54, 'F');
+    // Geometric Accents (Deep Blue & Gold)
+    doc.setFillColor(30, 58, 138); // Deep Blue
+    doc.triangle(0, 0, 60, 0, 0, 45, 'F');
+    
+    doc.setFillColor(37, 99, 235); // Bright Blue Overlay
+    doc.triangle(0, 0, 40, 0, 0, 25, 'F');
 
-    // Photo
+    doc.setFillColor(245, 158, 11); // Bottom Gold Strip
+    doc.rect(0, 52, 85.6, 2, 'F');
+
+    // --- 2. HEADER INFO (Right Aligned) ---
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 58, 138);
+    doc.setFontSize(9);
+    doc.text(libraryName.toUpperCase().substring(0, 25), 82, 7, null, null, "right");
+    
+    doc.setFontSize(5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text(libraryAddress.substring(0, 45), 82, 10, null, null, "right");
+
+    // --- 3. PHOTO SECTION ---
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(1);
+    doc.rect(5, 12, 21, 25, 'S'); // White border around photo
+    
     if (student.photo) {
-        doc.setDrawColor(255, 255, 255);
-        doc.setLineWidth(0.5);
-        doc.rect(3, 10, 20, 24, 'S');
-        doc.addImage(student.photo, 'JPEG', 3.2, 10.2, 19.6, 23.6);
+        doc.addImage(student.photo, 'JPEG', 5.5, 12.5, 20, 24);
     } else {
         doc.setFillColor(240, 240, 240);
-        doc.rect(3, 10, 20, 24, 'F');
+        doc.rect(5.5, 12.5, 20, 24, 'F');
+        doc.setFontSize(5);
+        doc.setTextColor(150);
+        doc.text("NO PHOTO", 15.5, 25, null, null, "center");
     }
 
-    // ID Number (on Blue panel)
+    // Active Status Badge
+    doc.setFillColor(22, 163, 74); // Green
+    doc.roundedRect(5.5, 38, 20, 4, 1, 1, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8);
+    doc.setFontSize(6);
     doc.setFont("helvetica", "bold");
-    doc.text(`ID: ${student.id}`, 13, 39, null, null, "center");
+    doc.text("ACTIVE MEMBER", 15.5, 40.5, null, null, "center");
 
-    // Header (Library Name)
-    doc.setTextColor(37, 99, 235);
+    // --- 4. STUDENT DETAILS ---
+    doc.setTextColor(15, 23, 42); // Dark Slate
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text(libraryName.toUpperCase().substring(0, 25), 30, 8); // Truncate if too long
+    doc.text(student.name.toUpperCase().substring(0, 22), 30, 18);
 
-    // Address Tagline
-    doc.setTextColor(100, 100, 100);
+    // ID Pill
+    doc.setFillColor(30, 58, 138);
+    doc.roundedRect(30, 20, 18, 4, 1, 1, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(7);
+    doc.text(`ID: ${student.id}`, 39, 22.8, null, null, "center");
+
+    // Info Lines
+    let y = 29;
+    const addDetail = (label, val) => {
+        doc.setFontSize(6);
+        doc.setTextColor(100); // Label Gray
+        doc.text(label.toUpperCase(), 30, y);
+        
+        doc.setTextColor(0); // Value Black
+        doc.setFont("helvetica", "bold");
+        doc.text(val || "-", 50, y);
+        y += 5; // Increased spacing for cleaner look
+    };
+
+    addDetail("Father's Name", student.fathersName);
+    addDetail("Mobile No", student.mobile);
+    
+    // Address (Bottom Line)
     doc.setFontSize(6);
-    doc.setFont("helvetica", "normal");
-    doc.text(libraryAddress.substring(0, 40), 30, 11);
+    doc.setTextColor(100);
+    doc.text("ADDRESS", 30, y);
+    doc.setTextColor(0);
+    doc.setFontSize(5);
+    const addr = student.address || "";
+    doc.text(addr.substring(0, 35) + (addr.length > 35 ? "..." : ""), 50, y);
 
-    // Separator
+    // --- 5. SEAT ALLOCATION BOX ---
     doc.setDrawColor(37, 99, 235);
     doc.setLineWidth(0.2);
-    doc.line(30, 13, 80, 13);
-
-    // Student Details
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text(student.name.substring(0, 20), 30, 20);
-
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "normal");
-    let y = 26;
+    doc.setFillColor(239, 246, 255);
+    doc.roundedRect(55, 43, 28, 7, 1, 1, 'FD');
     
-    // Calculate Valid Till (6 months from admission or today)
-    const admitDate = student.admissionDate ? new Date(student.admissionDate) : new Date();
-    const validDate = new Date(admitDate);
-    validDate.setMonth(validDate.getMonth() + 6);
+    doc.setTextColor(30, 58, 138);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    const seatText = student.seatType === 'Reserved' ? `S-${student.seat_no} (${getRoomName(student.roomId)})` : "GENERAL ACCESS";
+    doc.text(seatText, 69, 47.5, null, null, "center");
 
-    const details = [
-        { l: "Father", v: student.fathersName || '-' },
-        { l: "Mobile", v: student.mobile },
-        { l: "Shift", v: student.shift || 'Full Day' },
-        { l: "Seat", v: student.seatType === 'Reserved' ? `${student.seat_no}` : 'General' },
-        { l: "Valid Till", v: validDate.toLocaleDateString() }
-    ];
-
-    details.forEach(row => {
-        doc.setTextColor(120); 
-        doc.text(row.l + ":", 30, y);
-        doc.setTextColor(0);   
-        doc.text(row.v, 45, y);
-        y += 4;
-    });
-
-    // QR Code
+    // --- 6. HIGH-DETAIL QR CODE ---
     try {
-        const qrDataUrl = await QRCode.toDataURL(student.id.toString(), { margin: 0 });
-        doc.addImage(qrDataUrl, 'PNG', 68, 36, 15, 15);
-    } catch (err) {}
+        // Including more data creates a denser ("more detailed") QR code pattern
+        // The ID guarantees uniqueness.
+        const qrPayload = JSON.stringify({
+            uid: student.id,
+            n: student.name,
+            f: student.fathersName,
+            m: student.mobile,
+            s: student.seatType === 'Reserved' ? student.seat_no : 'Gen'
+        });
+        
+        const qrUrl = await QRCode.toDataURL(qrPayload, { margin: 0, errorCorrectionLevel: 'Q' });
+        doc.addImage(qrUrl, 'PNG', 68, 15, 14, 14);
+    } catch(err) {}
 
+    // Save
     doc.save(`${student.name}_ID_Card.pdf`);
   };
 
@@ -152,9 +185,11 @@ const Students = () => {
     doc.save(`Student_Report.pdf`);
   };
 
+  // Filter Logic
   const filtered = students?.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase()) || 
-    s.mobile.includes(search)
+    s.mobile.includes(search) ||
+    (s.seat_no && s.seat_no.toString().includes(search))
   ).reverse();
 
   return (
@@ -169,7 +204,7 @@ const Students = () => {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <input 
-            placeholder="Search name or mobile..." 
+            placeholder="Search name, mobile or seat..." 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-3 bg-gray-100 rounded-xl focus:bg-white focus:ring-2 ring-blue-500 outline-none transition-all"
