@@ -18,7 +18,7 @@ export const performBackup = async () => {
     
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Granthalaya_Backup_${new Date().toISOString().slice(0,10)}.json`;
+    link.download = `Library_MS_Backup_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

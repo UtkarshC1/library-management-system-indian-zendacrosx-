@@ -1,0 +1,29 @@
+
+> library-management-system@0.0.0 build
+> vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2658 modules transformed.
+x Build failed in 11.75s
+error during build:
+src/pages/Students.jsx (5:62): "IdCard" is not exported by "node_modules/lucide-react/dist/esm/lucide-react.js", imported by "src/pages/Students.jsx".
+file: /home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/src/pages/Students.jsx:5:62
+
+3: import { db } from '../db/db';
+4: import { useNavigate } from 'react-router-dom';
+5: import { Plus, Search, User, AlertCircle, Calendar, Download, IdCard, Users } from 'lucide-react';
+                                                                 ^
+6: import jsPDF from 'jspdf';
+7: import autoTable from 'jspdf-autotable';
+
+    at getRollupError (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/parseAst.js:401:41)
+    at error (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/parseAst.js:397:42)
+    at Module.error (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:17022:16)
+    at Module.traceVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:17478:29)
+    at ModuleScope.findVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:15141:39)
+    at ReturnValueScope.findVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:5688:38)
+    at FunctionBodyScope.findVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:5688:38)
+    at ReturnValueScope.findVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:5688:38)
+    at FunctionBodyScope.findVariable (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:5688:38)
+    at Identifier.bind (file:///home/zendacrosx/Desktop/library-management-system-indian-zendacrosx--main/node_modules/rollup/dist/es/shared/node-entry.js:5462:40)

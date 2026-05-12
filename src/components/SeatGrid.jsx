@@ -25,14 +25,14 @@ const SeatGrid = ({ totalSeats = 50 }) => {
           <div
             key={seatNum}
             onClick={() => isOccupied && alert(`Seat ${seatNum} is taken by ${occupantName}`)}
-            className={`aspect-square rounded-xl flex flex-col items-center justify-center border transition-all ${
+            className={`w-16 h-16 rounded-xl flex flex-col items-center justify-center border transition-all ${
               isOccupied 
                 ? 'bg-red-100 border-red-300 text-red-700 shadow-sm' 
                 : 'bg-white border-green-200 text-green-700 shadow-sm'
             }`}
           >
-            <span className="font-bold text-lg">{seatNum}</span>
-            <span className="text-[9px] truncate w-full text-center px-1 opacity-80">
+            <span className="font-bold text-sm">{seatNum}</span>
+            <span className="text-[7px] truncate w-full text-center px-1 opacity-80">
               {isOccupied ? occupantName : 'Free'}
             </span>
           </div>

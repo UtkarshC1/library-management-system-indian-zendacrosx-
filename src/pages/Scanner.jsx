@@ -2,318 +2,200 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { useNavigate } from 'react-router-dom';
-import { Search, LogIn, LogOut, QrCode, List, ArrowLeft, X, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Search, LogIn, LogOut, QrCode, List, ArrowLeft, X, CheckCircle, AlertTriangle, User, Zap, Activity, ShieldCheck, Target } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
-// --- INTERNAL TOAST COMPONENT (For Professional Alerts) ---
-const Toast = ({ message, type, onClose }) => {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  const bg = type === 'success' ? 'bg-emerald-600' : 'bg-red-500';
-  const icon = type === 'success' ? <CheckCircle size={20} className="text-white"/> : <AlertTriangle size={20} className="text-white"/>;
-
-  return (
-    <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-6 py-3 rounded-full shadow-2xl ${bg} text-white animate-fade-in-down`}>
-      {icon}
-      <span className="font-bold text-sm">{message}</span>
-      <button onClick={onClose} className="ml-2 opacity-80 hover:opacity-100"><X size={16}/></button>
-    </div>
-  );
-};
-
-// --- MAIN SCANNER COMPONENT ---
 const Scanner = () => {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('scan'); 
-  const [scanResult, setScanResult] = useState(null);
+  const [mode, setMode] = useState('scan');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanError, setScanError] = useState(null);
   const [search, setSearch] = useState('');
-  const [toast, setToast] = useState(null); // { msg, type }
 
-  // Optimized Audio Ref
-  const audioRef = useRef(new Audio('https://actions.google.com/sounds/v1/science_fiction/scifi_laser_1.ogg'));
+  const students = useLiveQuery(() => db.students.toArray());
+  const attendance = useLiveQuery(() => db.attendance.toArray());
 
-  const students = useLiveQuery(() => db.students.where('status').equals('Active').toArray());
-  
-  // Live log for UI feedback
-  const activeLogs = useLiveQuery(async () => {
-    const startOfDay = new Date(); startOfDay.setHours(0,0,0,0);
-    const logs = await db.attendance.where('date').above(startOfDay).toArray();
-    const statusMap = {};
-    logs.forEach(l => statusMap[l.studentId] = l.status);
-    return statusMap;
-  }, []);
+  const activeLogs = attendance?.reduce((acc, log) => {
+    const logDate = new Date(log.date).toDateString();
+    if (logDate === new Date().toDateString()) acc[log.studentId] = log.status;
+    return acc;
+  }, {});
 
-  const playSound = () => {
-    audioRef.current.currentTime = 0;
-    audioRef.current.play().catch(e => console.log("Audio blocked", e));
-    if (navigator.vibrate) navigator.vibrate(200); // Haptic feedback
-  };
-
-  const showToast = (msg, type = 'success') => setToast({ msg, type });
-
-  const processAttendance = async (scannedData) => {
+  const processAttendance = async (decodedText) => {
     if (isProcessing) return;
     setIsProcessing(true);
 
     try {
-      // --- ROBUST QR PARSING ---
-      let studentId = scannedData;
-      
-      // Attempt JSON Parse
-      if (typeof scannedData === 'string' && scannedData.trim().startsWith('{')) {
-          try {
-              const data = JSON.parse(scannedData);
-              if (data.uid) studentId = data.uid;
-          } catch(e) {
-              console.warn("QR is not JSON, treating as raw ID.");
-          }
-      }
+      const data = JSON.parse(decodedText);
+      const id = data.uid || data.id;
+      if (!id) throw new Error("INVALID_ENCRYPTION_KEY");
 
-      const id = parseInt(studentId);
-      if (isNaN(id)) throw new Error("Invalid QR Format");
-      
-      const student = await db.students.get(id);
+      const student = await db.students.get(parseInt(id));
+      if (!student) throw new Error("IDENTITY_NOT_FOUND");
 
-      if (!student) {
-        showToast("Student not found in database!", "error");
-        setIsProcessing(false);
-        return;
-      }
+      const lastStatus = activeLogs?.[id] || 'Out';
+      const newStatus = lastStatus === 'In' ? 'Out' : 'In';
 
-      // 1. DETERMINE STATUS
-      const lastLog = await db.attendance.where('studentId').equals(id).last();
-      const currentStatus = lastLog?.status || 'Out';
-      const newStatus = currentStatus === 'In' ? 'Out' : 'In';
-
-      // 2. SMART SEAT ALLOCATION (General Students)
-      if (newStatus === 'In' && student.seatType === 'General') {
-        const todaysLogs = await db.attendance.where('date').above(new Date().setHours(0,0,0,0)).toArray();
-        const statusMap = {};
-        todaysLogs.forEach(l => statusMap[l.studentId] = l.status);
-        
-        // Who is inside right now?
-        const currentlyInsideIds = Object.keys(statusMap)
-            .filter(sid => statusMap[sid] === 'In')
-            .map(sid => parseInt(sid));
-        
-        if(!currentlyInsideIds.includes(id)) currentlyInsideIds.push(id);
-
-        const studentsInside = await db.students.where('id').anyOf(currentlyInsideIds).toArray();
-        
-        let targetRoomId = student.roomId; // Preferred room
-        let assignedSeat = null;
-
-        const findFreeSeat = async (roomId) => {
-           const room = await db.rooms.get(roomId);
-           if (!room) return null;
-           const takenSeats = studentsInside
-              .filter(s => s.roomId === roomId && s.seat_no && s.id !== id) 
-              .map(s => s.seat_no);
-
-           for (let i = 1; i <= room.capacity; i++) {
-              if (!takenSeats.includes(i)) return i;
-           }
-           return null;
-        };
-
-        // Check Preferred -> Then Check All
-        if (targetRoomId) assignedSeat = await findFreeSeat(targetRoomId);
-        
-        if (!assignedSeat) {
-           const allRooms = await db.rooms.toArray();
-           for (const r of allRooms) {
-             const seat = await findFreeSeat(r.id);
-             if (seat) {
-               assignedSeat = seat;
-               targetRoomId = r.id;
-               break;
-             }
-           }
-        }
-
-        if (assignedSeat) {
-          await db.students.update(id, { seat_no: assignedSeat, roomId: targetRoomId });
-        } else {
-          showToast("⚠️ Library Full! Entry recorded without seat.", "error");
-        }
-      }
-
-      // 3. RELEASE SEAT
-      if (newStatus === 'Out' && student.seatType === 'General') {
-        await db.students.update(id, { seat_no: null });
-      }
-
-      // 4. LOG IT
       await db.attendance.add({
-        studentId: id,
+        studentId: parseInt(id),
         date: new Date(),
         status: newStatus,
         inTime: newStatus === 'In' ? new Date() : null,
         outTime: newStatus === 'Out' ? new Date() : null
       });
 
-      playSound();
-      setScanResult({ name: student.name, status: newStatus });
-      
+      setScanResult({ name: student.name, status: newStatus, id: student.id });
     } catch (err) {
-      console.error(err);
-      showToast(err.message || "Scanning Failed", "error");
+      setScanError(err.message);
     }
 
-    // Reset after delay
     setTimeout(() => {
-        setIsProcessing(false);
-        setScanResult(null);
-    }, 2500);
+      setIsProcessing(false);
+      setScanResult(null);
+      setScanError(null);
+    }, 3000);
   };
-  
+
   useEffect(() => {
     if (mode === 'scan' && !isProcessing && !scanResult) {
-      const scanner = new Html5QrcodeScanner(
-          "reader", 
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, 
-          false
-      );
-      
-      scanner.render((decodedText) => {
-        if (!isProcessing) { 
-            scanner.clear();
-            processAttendance(decodedText); 
-        }
-      }, (err) => {});
-
+      const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 280 }, false);
+      scanner.render(processAttendance, () => {});
       return () => scanner.clear().catch(() => {});
     }
   }, [mode, isProcessing, scanResult]);
 
-  const isInside = (id) => activeLogs && activeLogs[id] === 'In';
   const filtered = students?.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24 font-sans text-gray-900">
-       
-       {/* TOAST CONTAINER */}
-       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-
-       {/* HEADER */}
-       <div className="bg-white px-4 py-3 sticky top-0 z-10 border-b border-gray-100 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-           <div className="flex items-center gap-3">
-              <button onClick={() => navigate(-1)} className="p-2 bg-gray-50 border border-gray-200 rounded-full hover:bg-gray-100 transition-colors"><ArrowLeft size={18}/></button>
-              <div>
-                <h1 className="text-lg font-bold text-gray-800 leading-tight">Scanner</h1>
-                <p className="text-[10px] font-medium text-gray-400">Mark Attendance</p>
-              </div>
-           </div>
-           <button onClick={() => navigate('/attendance')} className="bg-blue-50 text-blue-600 px-3 py-2 rounded-xl text-xs font-bold border border-blue-100 active:scale-95 transition-transform">
-             History Log
+    <div className="max-w-5xl mx-auto p-4 md:p-12 space-y-12 animate-reveal relative">
+      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-50 blur-[150px] -z-10 rounded-full"></div>
+      
+      {/* Header HUD */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-8 border-b border-slate-200 pb-12">
+        <div className="flex items-center gap-6">
+           <button onClick={() => navigate(-1)} className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-500 hover:text-blue-600 transition-all shadow-sm active:scale-90 group">
+              <ArrowLeft size={24} className="group-hover:-translate-x-1 transition-transform" />
            </button>
+           <div>
+              <div className="flex items-center gap-3 mb-2">
+                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] animate-pulse"></div>
+                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.4em]">Live Attendance</span>
+              </div>
+              <h1 className="text-5xl font-display font-extrabold text-slate-900 tracking-tight leading-none mb-1">Scanner</h1>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Scan ID Card to mark attendance</p>
+           </div>
         </div>
         
-        {/* MODE TOGGLE */}
-        <div className="flex bg-gray-100 p-1.5 rounded-2xl relative">
-           <div className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] bg-white rounded-xl shadow-sm transition-all duration-300 ease-out ${mode === 'list' ? 'translate-x-[calc(100%+6px)]' : 'translate-x-0'}`}></div>
-           <button onClick={() => setMode('scan')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold relative z-10 transition-colors ${mode === 'scan' ? 'text-gray-900' : 'text-gray-400'}`}>
-             <div className="flex items-center justify-center gap-2"><QrCode size={16}/> Scan QR</div>
-           </button>
-           <button onClick={() => setMode('list')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold relative z-10 transition-colors ${mode === 'list' ? 'text-gray-900' : 'text-gray-400'}`}>
-             <div className="flex items-center justify-center gap-2"><List size={16}/> Manual List</div>
-           </button>
+        <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 shadow-sm backdrop-blur-xl">
+           {['scan', 'list'].map(m => (
+             <button key={m} onClick={() => setMode(m)} className={`px-8 py-3.5 rounded-xl text-[10px] font-bold uppercase tracking-[0.3em] transition-all duration-500 ${mode === m ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}>
+                {m === 'scan' ? 'Scan Card' : 'Manual Entry'}
+             </button>
+           ))}
         </div>
       </div>
 
-      {/* === SCANNER VIEW === */}
-      {mode === 'scan' && (
-        <div className="flex flex-col items-center justify-center h-[65vh] p-4 relative">
-            {/* Scanner Frame */}
-            <div className="bg-white p-2 rounded-3xl shadow-2xl border border-gray-100 w-full max-w-xs relative overflow-hidden">
-                {!scanResult && !isProcessing && (
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent z-20 animate-[scan_2s_ease-in-out_infinite]" style={{top: '50%'}}></div>
-                )}
-                <div id="reader" className="overflow-hidden rounded-2xl bg-black min-h-[250px]"></div>
-                <div className="absolute inset-0 border-[3px] border-white/50 rounded-3xl pointer-events-none"></div>
-            </div>
-            
-            <p className="mt-6 text-gray-400 text-xs font-medium uppercase tracking-widest">Align QR Code within frame</p>
+      <div className="max-w-3xl mx-auto relative">
+         
+         {mode === 'scan' && (
+           <div className="space-y-12">
+              <div className="luxury-card p-6 rounded-[4rem] bg-white border-slate-200 shadow-sm relative group overflow-hidden">
+                 
+                 <div id="reader" className="rounded-[3rem] overflow-hidden"></div>
+                 
+                 {!scanResult && !scanError && !isProcessing && (
+                   <div className="absolute inset-x-8 top-0 h-1.5 bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] animate-[scan_3s_infinite] z-20 opacity-60"></div>
+                 )}
+                 
+                 {scanError && (
+                   <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center animate-reveal z-50 text-center p-12">
+                      <div className="w-32 h-32 rounded-[2.5rem] flex items-center justify-center mb-8 shadow-sm relative bg-rose-50 border border-rose-200 text-rose-600">
+                         <div className="absolute inset-0 rounded-[2.5rem] animate-ping opacity-20 bg-inherit"></div>
+                         <AlertTriangle size={48} strokeWidth={2.5}/>
+                      </div>
+                      
+                      <p className="text-[10px] font-bold text-rose-600 uppercase tracking-[0.5em] mb-4">Error</p>
+                      <h2 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight mb-2">{scanError}</h2>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-10">Invalid ID</p>
+                   </div>
+                 )}
+                 
+                 {scanResult && (
+                   <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center animate-reveal z-50 text-center p-12">
+                      <div className={`w-32 h-32 rounded-[2.5rem] flex items-center justify-center mb-8 shadow-sm relative border ${scanResult.status === 'In' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                         <div className="absolute inset-0 rounded-[2.5rem] animate-ping opacity-20 bg-inherit"></div>
+                         {scanResult.status === 'In' ? <LogIn size={48} strokeWidth={2.5}/> : <LogOut size={48} strokeWidth={2.5}/>}
+                      </div>
+                      
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.5em] mb-4">Verification Success</p>
+                      <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight mb-2">{scanResult.name}</h2>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-10">Student #{scanResult.id}</p>
+                      
+                      <div className={`inline-flex items-center gap-3 px-10 py-4 rounded-2xl font-bold text-xs uppercase tracking-[0.2em] border transition-all ${scanResult.status === 'In' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-700 border-slate-200'}`}>
+                         <Activity size={16} className="animate-pulse"/> Status: {scanResult.status === 'In' ? 'Marked Present' : 'Marked Left'}
+                      </div>
+                   </div>
+                 )}
+              </div>
 
-            {/* Result Popup (Glassmorphism) */}
-            {scanResult && (
-                <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 bg-white/90 backdrop-blur-xl border border-white/50 p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-3 animate-fade-in scale-105`}>
-                    <div className={`p-4 rounded-full ${scanResult.status === 'In' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'} shadow-inner`}>
-                       {scanResult.status === 'In' ? <LogIn size={32}/> : <LogOut size={32}/>}
+              <div className="flex justify-center px-8">
+                 <div className="flex flex-col items-center gap-3">
+                    <div className="px-6 py-2 bg-white border border-slate-200 rounded-full flex items-center gap-3 shadow-sm">
+                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">System Ready</span>
                     </div>
-                    <div className="text-center">
-                       <h2 className="text-xl font-bold text-gray-800">{scanResult.name}</h2>
-                       <p className={`text-sm font-bold uppercase tracking-wider mt-1 ${scanResult.status === 'In' ? 'text-green-600' : 'text-red-500'}`}>
-                         Marked {scanResult.status === 'In' ? 'Present' : 'Absent'}
-                       </p>
-                    </div>
-                </div>
-            )}
-        </div>
-      )}
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Awaiting ID Card</p>
+                 </div>
+              </div>
+           </div>
+         )}
 
-      {/* === MANUAL LIST VIEW === */}
-      {mode === 'list' && (
-        <div className="p-4 space-y-4">
-            <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-                <input 
-                  placeholder="Search student by name..." 
-                  value={search} 
-                  onChange={e => setSearch(e.target.value)} 
-                  className="w-full pl-11 p-4 bg-white rounded-2xl border border-gray-100 outline-none focus:ring-2 ring-blue-500/20 focus:border-blue-500 transition-all font-medium shadow-sm" 
-                />
-            </div>
-            
-            <div className="space-y-3 pb-10">
-                {filtered?.map(s => {
-                    const inside = isInside(s.id);
+         {mode === 'list' && (
+           <div className="space-y-8 animate-reveal">
+              <div className="relative group">
+                 <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={24}/>
+                 <input 
+                    placeholder="Search Students..." 
+                    value={search} onChange={e=>setSearch(e.target.value)}
+                    className="luxury-card shadow-sm w-full pl-16 pr-8 py-6 bg-white border-slate-200 focus:border-blue-300 text-slate-900 font-bold text-2xl placeholder:text-slate-400 outline-none transition-colors" 
+                 />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                 {filtered?.slice(0, 8).map(s => {
+                    const inside = activeLogs?.[s.id] === 'In';
                     return (
-                        <button 
-                          key={s.id} 
-                          onClick={() => processAttendance(s.id)} 
-                          className="w-full bg-white p-3 pr-4 rounded-2xl border border-gray-100 flex justify-between items-center active:scale-[0.98] active:bg-gray-50 transition-all shadow-sm hover:shadow-md"
-                        >
-                            <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white text-lg font-bold shadow-sm ${inside ? 'bg-gradient-to-br from-green-400 to-green-600' : 'bg-gradient-to-br from-gray-300 to-gray-400'}`}>
-                                    {s.name.charAt(0)}
+                       <div key={s.id} onClick={() => processAttendance(JSON.stringify({uid: s.id}))} className="luxury-card p-6 rounded-3xl flex items-center justify-between cursor-pointer bg-white border-slate-200 hover:bg-slate-50 hover:border-blue-300 shadow-sm transition-all active:scale-95 group">
+                          <div className="flex items-center gap-6">
+                             <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden p-0.5 shadow-sm group-hover:rotate-3 transition-transform">
+                                {s.photo ? <img src={s.photo} className="w-full h-full object-cover rounded-xl" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><User size={24}/></div>}
+                             </div>
+                             <div>
+                                <p className="text-xl font-display font-extrabold text-slate-900 tracking-tight mb-1 group-hover:text-blue-600 transition-colors">{s.name}</p>
+                                <div className="flex items-center gap-3">
+                                   <div className={`w-1.5 h-1.5 rounded-full ${inside ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{inside ? 'Present' : 'Left'}</span>
                                 </div>
-                                <div className="text-left">
-                                    <p className="font-bold text-gray-800 text-sm">{s.name}</p>
-                                    <div className={`flex items-center gap-1 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md w-fit ${inside ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                                       {inside ? '● Inside' : '○ Outside'}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className={`p-2 rounded-full transition-colors ${inside ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-green-500 bg-green-50 hover:bg-green-100'}`}>
-                                {inside ? <LogOut size={20}/> : <LogIn size={20}/>}
-                            </div>
-                        </button>
-                    )
-                })}
-            </div>
-        </div>
-      )}
+                             </div>
+                          </div>
+                          <div className={`p-4 rounded-2xl border transition-all ${inside ? 'bg-slate-50 border-slate-200 text-slate-500 group-hover:bg-slate-100 group-hover:text-slate-900' : 'bg-blue-50 border-blue-200 text-blue-600 group-hover:bg-blue-600 group-hover:text-white'}`}>
+                             {inside ? <LogOut size={24} strokeWidth={2.5}/> : <LogIn size={24} strokeWidth={2.5}/>}
+                          </div>
+                       </div>
+                    );
+                 })}
+              </div>
+           </div>
+         )}
+      </div>
 
-      {/* CSS for Scanner Line Animation */}
       <style>{`
         @keyframes scan {
-          0% { top: 0%; opacity: 0; }
+          0% { transform: translateY(0); opacity: 0; }
           10% { opacity: 1; }
           90% { opacity: 1; }
-          100% { top: 100%; opacity: 0; }
-        }
-        .animate-fade-in-down {
-          animation: fadeInDown 0.3s ease-out forwards;
-        }
-        @keyframes fadeInDown {
-          from { opacity: 0; transform: translate(-50%, -20px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
+          100% { transform: translateY(450px); opacity: 0; }
         }
       `}</style>
     </div>
